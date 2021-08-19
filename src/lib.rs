@@ -36,7 +36,7 @@ pub type Result<T, E = runner::Error> = std::result::Result<T, E>;
 pub use self::{
     config::Config,
     proxy::{logger, Builder, PendingValidation, Server, Validated},
-    runner::{run, run_with_config},
+    runner::{run, run_with_config, test},
 };
 
 pub use quilkin_macros::include_proto;

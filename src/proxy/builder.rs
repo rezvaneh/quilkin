@@ -235,6 +235,10 @@ impl Builder<PendingValidation> {
 }
 
 impl Builder<Validated> {
+    pub fn get_metrics_registry(&self) -> Arc<Metrics> {
+        self.metrics.clone()
+    }
+
     pub fn build(self) -> Server {
         Server {
             log: self.log.new(o!("source" => "server::Server")),

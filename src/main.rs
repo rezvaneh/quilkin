@@ -30,31 +30,44 @@ async fn main() -> quilkin::Result<()> {
     };
 
     let config_arg = Arg::with_name("config")
-                .short("c")
-                .long("config")
-                .value_name("CONFIG")
-                .help("The YAML configuration file")
-                .takes_value(true);
+        .short("c")
+        .long("config")
+        .value_name("CONFIG")
+        .help("The YAML configuration file")
+        .takes_value(true);
 
     let cli = App::new(clap::crate_name!())
         .version(&*version)
         .about(clap::crate_description!())
         .setting(AppSettings::VersionlessSubcommands)
         .setting(AppSettings::SubcommandRequiredElseHelp)
-        .subcommand(SubCommand::with_name("run").about("Start Quilkin process.").arg(config_arg.clone()))
-        .subcommand(SubCommand::with_name("test").about("Execute one or more sets of tests.").arg(config_arg))
+        .subcommand(
+            SubCommand::with_name("run")
+                .about("Start Quilkin process.")
+                .arg(config_arg.clone()),
+        )
+        .subcommand(
+            SubCommand::with_name("test")
+                .about("Execute one or more sets of tests.")
+                .arg(config_arg),
+        )
         .get_matches();
 
     slog::info!(log, "Starting Quilkin"; "version" => &*version);
 
     match cli.subcommand() {
         ("run", Some(matches)) => {
-            let config = quilkin::config::Config::find(&log, matches.value_of("config")).map(Arc::new)?;
+            let config =
+                quilkin::config::Config::find(&log, matches.value_of("config")).map(Arc::new)?;
 
             quilkin::run_with_config(log, config, vec![]).await
         }
 
-        ("test", Some(_matches)) => todo!(),
+        ("test", Some(matches)) => {
+            let config = quilkin::config::Testsuite::find(&log, matches.value_of("config"))?;
+
+            quilkin::test(log, config, vec![]).await
+        }
 
         (_, _) => unreachable!(),
     }

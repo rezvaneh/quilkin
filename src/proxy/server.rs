@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use slog::{debug, error, info, trace, warn, Logger};
 use tokio::net::UdpSocket;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 
@@ -99,7 +99,11 @@ struct ProcessDownstreamReceiveConfig {
 impl Server {
     /// start the async processing of incoming UDP packets. Will block until an
     /// event is sent through the stop Receiver.
-    pub async fn run(self, mut shutdown_rx: watch::Receiver<()>) -> Result<()> {
+    pub async fn run(
+        self,
+        ready_tx: oneshot::Sender<SocketAddr>,
+        mut shutdown_rx: watch::Receiver<()>,
+    ) -> Result<()> {
         self.log_config();
 
         if let Some(admin) = &self.admin {
@@ -107,6 +111,7 @@ impl Server {
         }
 
         let socket = Arc::new(Server::bind(self.config.proxy.port).await?);
+        let local_addr = socket.local_addr().unwrap();
         let session_manager = SessionManager::new(self.log.clone(), shutdown_rx.clone());
         let (send_packets, receive_packets) = mpsc::channel::<Packet>(1024);
 
@@ -124,6 +129,9 @@ impl Server {
             send_packets,
             shutdown_rx: shutdown_rx.clone(),
         });
+
+        slog::info!(self.log, "Quilkin is ready.");
+        let _ = ready_tx.send(local_addr);
 
         tokio::select! {
             join_result = recv_loop => {
