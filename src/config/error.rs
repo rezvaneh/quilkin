@@ -17,19 +17,19 @@
 use std::fmt;
 
 #[derive(thiserror::Error, Debug)]
-pub enum TestsuiteDecodeError {
+pub enum TestSuiteDecodeError {
     #[error(
         "Expected Quilkin configuration. Configuration must be either \
-             included in the testsuite, or set `config` in your testsuite."
+             included in the test suite, or set `config` in your test suite."
     )]
     MissingConfig,
     #[error(
-        "Expected Quilkin a testsuite after the configuration. Ensure \
+        "Expected Quilkin a test suite after the configuration. Ensure \
              there is a `---` separating the documents."
     )]
     MissingTestOptions,
     #[error(
-        "Expected `config` key in the testsuite, because no configuration \
+        "Expected `config` key in the test suite, because no configuration \
              was found included."
     )]
     MissingConfigInTestOptions,
@@ -39,13 +39,13 @@ pub enum TestsuiteDecodeError {
     Io(std::io::Error),
 }
 
-impl From<serde_yaml::Error> for TestsuiteDecodeError {
+impl From<serde_yaml::Error> for TestSuiteDecodeError {
     fn from(value: serde_yaml::Error) -> Self {
         Self::Yaml(value)
     }
 }
 
-impl From<std::io::Error> for TestsuiteDecodeError {
+impl From<std::io::Error> for TestSuiteDecodeError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
     }

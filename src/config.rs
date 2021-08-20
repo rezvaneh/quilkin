@@ -16,10 +16,7 @@
 
 //! Quilkin configuration.
 
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-};
+use std::{net::SocketAddr, path::Path};
 
 use base64_serde::base64_serde_type;
 use serde::{Deserialize, Serialize};
@@ -28,13 +25,18 @@ use uuid::Uuid;
 mod builder;
 mod config_type;
 mod error;
+mod test;
 
 use crate::endpoint::Endpoint;
-use error::TestsuiteDecodeError;
 
 pub(crate) use self::error::ValueInvalidArgs;
 
-pub use self::{builder::Builder, config_type::ConfigType, error::ValidationError};
+pub use self::{
+    builder::Builder,
+    config_type::ConfigType,
+    error::ValidationError,
+    test::{TestCase, TestConfig, TestSuite},
+};
 
 base64_serde_type!(Base64Standard, base64::STANDARD);
 
@@ -211,63 +213,6 @@ impl Source {
 pub struct Filter {
     pub name: String,
     pub config: Option<serde_yaml::Value>,
-}
-
-/// The configuration of a Quilkin testsuite.
-pub struct Testsuite {
-    pub config: Config,
-    pub options: TestConfig,
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct TestConfig {
-    pub config: Option<PathBuf>,
-    pub tests: std::collections::HashMap<String, TestOptions>,
-}
-
-impl Testsuite {
-    pub fn find<P: AsRef<Path>>(
-        log: &slog::Logger,
-        path: Option<P>,
-    ) -> Result<Self, TestsuiteDecodeError> {
-        find_config_file(log, path)
-            .map_err(From::from)
-            .and_then(|s| Self::from_yaml(&s))
-    }
-
-    /// Attempts to deserialize [`Self`] from a YAML document. A valid source is
-    /// either a combination of [`Config`] document followed by [`TestConfig`]
-    /// document separated by a `---` (YAML document separator), or a
-    /// `TestConfig` document containing a `config` key that points to a valid
-    /// `Config` file.
-    pub fn from_yaml(src: &str) -> Result<Self, TestsuiteDecodeError> {
-        Ok(
-            if let Ok(options) = serde_yaml::from_str::<TestConfig>(src) {
-                let path = options
-                    .config
-                    .as_deref()
-                    .ok_or(TestsuiteDecodeError::MissingConfigInTestOptions)?;
-                let config = serde_yaml::from_reader(std::fs::File::open(path)?)?;
-                Self { config, options }
-            } else {
-                let mut de = serde_yaml::Deserializer::from_str(src);
-                let config =
-                    Config::deserialize(de.next().ok_or(TestsuiteDecodeError::MissingConfig)?)?;
-                let options = TestConfig::deserialize(
-                    de.next().ok_or(TestsuiteDecodeError::MissingTestOptions)?,
-                )?;
-                Self { config, options }
-            },
-        )
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct TestOptions {
-    /// The data to be given to Quilkin.
-    pub input: String,
-    /// What we expect Quilkin to send to the game server.
-    pub output: String,
 }
 
 #[cfg(test)]

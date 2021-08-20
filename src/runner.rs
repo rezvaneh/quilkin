@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 
-use std::{
-    net::{Ipv4Addr, SocketAddr},
-    sync::Arc,
-};
+use std::{net::Ipv4Addr, sync::Arc};
 
 use slog::{info, o};
 use tokio::{
@@ -26,7 +23,7 @@ use tokio::{
 };
 
 use crate::{
-    config::{Config, Testsuite},
+    config::{Config, TestSuite},
     endpoint::Endpoint,
     filters::{DynFilterFactory, FilterRegistry, FilterSet},
     proxy::Builder,
@@ -90,32 +87,23 @@ pub async fn run_with_config(
 /// alongside the default filter factories.
 pub async fn test(
     base_log: slog::Logger,
-    mut testsuite: Testsuite,
+    mut testsuite: TestSuite,
     filter_factories: impl IntoIterator<Item = DynFilterFactory>,
 ) -> Result<(), Error> {
-    use once_cell::sync::Lazy;
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+    let mut receiver = socket.local_addr().unwrap();
+    receiver.set_ip(Ipv4Addr::LOCALHOST.into());
 
-    static FEEDBACK_LOOP: Lazy<SocketAddr> = Lazy::new(|| {
-        let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
-        let local_addr = socket.local_addr().unwrap();
-        std::thread::spawn(move || loop {
-            let mut packet = [0; 0xffff];
-            let (_, addr) = socket.recv_from(&mut packet).unwrap();
-            let length = packet
-                .iter()
-                .position(|&x| x == 0)
-                .unwrap_or_else(|| packet.len());
+    std::thread::spawn(move || {
+        let mut packet = [0; 0xffff];
+        loop {
+            let (length, addr) = socket.recv_from(&mut packet).unwrap();
             let packet = &packet[..length];
-            eprintln!("Received: {:?}", packet);
             socket.send_to(packet, addr).unwrap();
-        });
-
-        local_addr
+        }
     });
 
     let log = base_log.new(o!("source" => "run"));
-    let mut receiver = *FEEDBACK_LOOP;
-    receiver.set_ip(Ipv4Addr::LOCALHOST.into());
 
     {
         let endpoints = testsuite.config.source.get_static_endpoints_mut().unwrap();

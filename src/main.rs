@@ -64,7 +64,7 @@ async fn main() -> quilkin::Result<()> {
         }
 
         ("test", Some(matches)) => {
-            let config = quilkin::config::Testsuite::find(&log, matches.value_of("config"))?;
+            let config = quilkin::config::TestSuite::find(&log, matches.value_of("config"))?;
 
             quilkin::test(log, config, vec![]).await
         }
