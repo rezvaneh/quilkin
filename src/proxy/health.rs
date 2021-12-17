@@ -17,20 +17,22 @@
 use std::sync::atomic::AtomicBool;
 
 use hyper::{Body, Response, StatusCode};
-use slog::{error, o, Logger};
+use tracing::{error, span, Level};
+
 use std::panic;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 pub struct Health {
-    log: Logger,
     healthy: Arc<AtomicBool>,
 }
 
 impl Health {
-    pub fn new(base: &Logger) -> Self {
+    pub fn new() -> Self {
+        let span = span!(Level::INFO, source = "proxy::Health");
+        let _enter = span.enter();
+
         let health = Self {
-            log: base.new(o!("source" => "proxy::Health")),
             healthy: Arc::new(AtomicBool::new(true)),
         };
 
@@ -38,7 +40,7 @@ impl Health {
         let healthy = health.healthy.clone();
         let default_hook = panic::take_hook();
         panic::set_hook(Box::new(move |panic_info| {
-            error!(log, "Panic has occurred. Moving to Unhealthy");
+            error!("Panic has occurred. Moving to Unhealthy");
             healthy.swap(false, Relaxed);
             default_hook(panic_info);
         }));
@@ -61,13 +63,11 @@ impl Health {
 #[cfg(test)]
 mod tests {
     use crate::proxy::health::Health;
-    use crate::test_utils::logger;
     use hyper::StatusCode;
     use std::panic;
 
     #[test]
     fn panic_hook() {
-        let log = logger();
         let health = Health::new(&log);
 
         let response = health.check_healthy();

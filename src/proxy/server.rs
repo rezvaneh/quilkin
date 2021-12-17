@@ -19,10 +19,12 @@ use std::sync::Arc;
 
 use prometheus::HistogramTimer;
 use slog::{debug, error, info, trace, warn, Logger};
+
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
+use tracing::{debug, error, info, trace, warn};
 
 use metrics::Metrics as ProxyMetrics;
 use resource_manager::{DynamicResourceManagers, StaticResourceManagers};
@@ -51,7 +53,7 @@ mod resource_manager;
 /// Server is the UDP server main implementation
 pub struct Server {
     // We use pub(super) to limit instantiation only to the Builder.
-    pub(super) log: Logger,
+    // pub(super) log: Logger,
     pub(super) config: Arc<ValidatedConfig>,
     // Admin may be turned off, primarily for testing.
     pub(super) admin: Option<Admin>,
@@ -96,7 +98,6 @@ struct DownstreamReceiveWorkerConfig {
 /// Contains arguments to process a received downstream packet, through the
 /// filter chain and session pipeline.
 struct ProcessDownstreamReceiveConfig {
-    log: Logger,
     proxy_metrics: ProxyMetrics,
     session_metrics: SessionMetrics,
     cluster_manager: SharedClusterManager,
@@ -113,7 +114,8 @@ impl Server {
         self.log_config();
 
         let socket = Arc::new(Server::bind(self.config.proxy.port).await?);
-        let session_manager = SessionManager::new(self.log.clone(), shutdown_rx.clone());
+
+        let session_manager = SessionManager::new(shutdown_rx.clone());
         let (send_packets, receive_packets) = mpsc::channel::<UpstreamPacket>(1024);
 
         let session_ttl = Duration::from_secs(SESSION_TIMEOUT_SECONDS);
@@ -299,10 +301,7 @@ impl Server {
     // For each worker config provided, spawn a background task that sits in a
     // loop, receiving packets from a queue and processing them through
     // the filter chain.
-    fn spawn_downstream_receive_workers(
-        log: Logger,
-        worker_configs: Vec<DownstreamReceiveWorkerConfig>,
-    ) {
+    fn spawn_downstream_receive_workers(worker_configs: Vec<DownstreamReceiveWorkerConfig>) {
         for DownstreamReceiveWorkerConfig {
             worker_id,
             mut packet_rx,
@@ -319,13 +318,13 @@ impl Server {
                         match packet {
                           Some(packet) => Self::process_downstream_received_packet(packet, &receive_config).await,
                           None => {
-                            debug!(log, "Worker-{} exiting: work sender channel was closed.", worker_id);
+                            debug!("Worker-{} exiting: work sender channel was closed.", worker_id);
                             return;
                           }
                         }
                       }
                       _ = shutdown_rx.changed() => {
-                        debug!(log, "Worker-{} exiting: received shutdown signal.", worker_id);
+                        debug!("Worker-{} exiting: received shutdown signal.", worker_id);
                         return;
                       }
                     }
@@ -340,10 +339,9 @@ impl Server {
         args: &ProcessDownstreamReceiveConfig,
     ) {
         trace!(
-            args.log,
             "Packet Received";
-            "from" => &packet.from,
-            "contents" => debug::bytes_to_string(&packet.contents),
+            "from" = &recv_addr,
+            "contents" = debug::bytes_to_string(&packet.contents),
         );
 
         let endpoints = match args.cluster_manager.read().get_all_endpoints() {
@@ -457,19 +455,14 @@ impl Server {
     }
 
     // A helper function to push a session's packet on its socket.
-    async fn session_send_packet_helper(
-        log: &Logger,
-        session: &Session,
-        packet: &[u8],
-        ttl: Duration,
-    ) {
+    async fn session_send_packet_helper(session: &Session, packet: &[u8], ttl: Duration) {
         match session.send(packet).await {
             Ok(_) => {
                 if let Err(err) = session.update_expiration(ttl) {
-                    warn!(log, "Error updating session expiration"; "error" => %err)
+                    warn!("Error updating session expiration", "error" = %err)
                 }
             }
-            Err(err) => error!(log, "Error sending packet from session"; "error" => %err),
+            Err(err) => error!("Error sending packet from session", "error" = %err),
         };
     }
 
@@ -480,37 +473,39 @@ impl Server {
         socket: Arc<UdpSocket>,
         mut receive_packets: mpsc::Receiver<UpstreamPacket>,
     ) {
-        let log = self.log.clone();
         tokio::spawn(async move {
             while let Some(packet) = receive_packets.recv().await {
                 debug!(
-                    log,
                     "Sending packet back to origin";
-                    "origin" => packet.dest(),
-                    "contents" => debug::bytes_to_string(packet.contents()),
+                    "origin" = packet.dest(),
+                    "contents" = debug::bytes_to_string(packet.contents()),
                 );
 
                 let address = match packet.dest().to_socket_addr() {
                     Ok(address) => address,
                     Err(error) => {
-                        error!(log, "Error resolving address"; "dest" => %packet.dest(), "error" => %error);
+                        error!("Error resolving address", "dest" = %packet.dest(), "error" = %error);
                         continue;
                     }
                 };
 
                 if let Err(err) = socket.send_to(packet.contents(), address).await {
-                    error!(log, "Error sending packet"; "dest" => %packet.dest(), "error" => %err);
+                    error!("Error sending packet", "dest" = %packet.dest(), "error" = %err);
                 }
                 packet.stop_and_record();
             }
-            debug!(log, "Receiver closed");
+            debug!("Receiver closed");
             Ok::<_, eyre::Error>(())
         });
     }
 
     /// log_config outputs a log of what is configured
     fn log_config(&self) {
-        info!(self.log, "Starting"; "port" => self.config.proxy.port, "proxy_id" => &self.config.proxy.id);
+        info!(
+            "Starting",
+            "port" = self.config.proxy.port,
+            "proxy_id" = &self.config.proxy.id
+        );
     }
 
     /// bind binds the local configured port
@@ -668,7 +663,7 @@ mod tests {
         ) -> Result {
             let t = TestHelper::default();
 
-            info!(t.log, "Test"; "name" => name);
+            info!("Test", "name" = name);
             let msg = "hello".to_string();
             let endpoint = t.open_socket_and_recv_single_packet().await;
 
@@ -677,7 +672,7 @@ mod tests {
             // need to switch to 127.0.0.1, as the request comes locally
             receive_addr.set_ip("127.0.0.1".parse().unwrap());
 
-            let session_manager = SessionManager::new(t.log.clone(), shutdown_rx.clone());
+            let session_manager = SessionManager::new(shutdown_rx.clone());
             let (send_packets, mut recv_packets) = mpsc::channel::<UpstreamPacket>(1);
 
             let time_increment = 10;

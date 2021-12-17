@@ -23,13 +23,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use slog::{debug, error, o, trace, warn, Logger};
 use tokio::{
     net::UdpSocket,
     select,
     sync::{mpsc, watch},
     time::{Duration, Instant},
 };
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     endpoint::{Endpoint, EndpointAddress},
@@ -45,7 +45,6 @@ type Result<T> = std::result::Result<T, Error>;
 
 /// Session encapsulates a UDP stream session
 pub struct Session {
-    log: Logger,
     metrics: Metrics,
     proxy_metrics: ProxyMetrics,
     filter_manager: SharedFilterManager,
@@ -131,7 +130,7 @@ pub struct SessionArgs {
 impl SessionArgs {
     /// Creates a new Session, and starts the process of receiving udp sockets
     /// from its ephemeral port from endpoint(s)
-    pub async fn into_session(self, base: &Logger) -> Result<Session> {
+    pub async fn into_session(self) -> Result<Session> {
         Session::new(base, self).await
     }
 }
@@ -139,8 +138,6 @@ impl SessionArgs {
 impl Session {
     /// internal constructor for a Session from SessionArgs
     async fn new(base: &Logger, args: SessionArgs) -> Result<Self> {
-        let log = base
-            .new(o!("source" => "proxy::Session", "from" => args.from.clone(), "dest_address" => args.dest.address.clone()));
         let addr = (std::net::Ipv4Addr::UNSPECIFIED, 0);
         let socket = Arc::new(UdpSocket::bind(addr).await.map_err(Error::BindUdpSocket)?);
         let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
@@ -151,7 +148,6 @@ impl Session {
         let s = Session {
             metrics: args.metrics,
             proxy_metrics: args.proxy_metrics,
-            log,
             filter_manager: args.filter_manager,
             socket: socket.clone(),
             from: args.from,
@@ -160,7 +156,7 @@ impl Session {
             expiration,
             shutdown_tx,
         };
-        debug!(s.log, "Session created");
+        debug!("Session created");
 
         s.metrics.sessions_total.inc();
         s.metrics.active_sessions.inc();
@@ -186,19 +182,18 @@ impl Session {
         tokio::spawn(async move {
             let mut buf: Vec<u8> = vec![0; 65535];
             loop {
-                debug!(log, "Awaiting incoming packet");
+                debug!("Awaiting incoming packet");
                 select! {
                     received = socket.recv_from(&mut buf) => {
                         match received {
                             Err(err) => {
                                 metrics.rx_errors_total.inc();
-                                error!(log, "Error receiving packet"; "error" => %err);
+                                error!("Error receiving packet", "error" = %err);
                             },
                             Ok((size, recv_addr)) => {
                                 metrics.rx_bytes_total.inc_by(size as u64);
                                 metrics.rx_packets_total.inc();
                                 Session::process_recv_packet(
-                                    &log,
                                     &metrics,
                                     &mut sender,
                                     &expiration,
@@ -215,7 +210,7 @@ impl Session {
                         };
                     }
                     _ = shutdown_rx.changed() => {
-                        debug!(log, "Closing Session");
+                        debug!("Closing Session");
                         return;
                     }
                 };
@@ -238,7 +233,6 @@ impl Session {
 
     /// process_recv_packet processes a packet that is received by this session.
     async fn process_recv_packet(
-        log: &Logger,
         metrics: &Metrics,
         sender: &mut mpsc::Sender<UpstreamPacket>,
         expiration: &Arc<AtomicU64>,
@@ -254,12 +248,12 @@ impl Session {
             timer,
         } = packet_ctx;
 
-        trace!(log, "Received packet"; "from" => from.clone(),
-            "endpoint_addr" => &endpoint.address,
-            "contents" => debug::bytes_to_string(packet));
+        trace!("Received packet", "from" => from.clone(),
+            "endpoint_addr" = &endpoint.address,
+            "contents" = debug::bytes_to_string(packet));
 
         if let Err(err) = Session::do_update_expiration(expiration, ttl) {
-            warn!(log, "Error updating session expiration"; "error" => %err)
+            warn!("Error updating session expiration"; "error" = %err)
         }
 
         let filter_chain = {
@@ -314,8 +308,8 @@ impl Session {
 
     /// Sends a packet to the Session's dest.
     pub async fn send(&self, buf: &[u8]) -> crate::Result<Option<usize>> {
-        trace!(self.log, "Sending packet";
-        "dest_address" => &self.dest.address,
+        trace!("Sending packet",
+        "dest_address" = &self.dest.address,
         "contents" => debug::bytes_to_string(buf));
 
         self.do_send(buf)
@@ -349,10 +343,17 @@ impl Drop for Session {
             .observe(self.created_at.elapsed().as_secs() as f64);
 
         if let Err(error) = self.shutdown_tx.send(()) {
-            warn!(self.log, "Error sending session shutdown signal"; "error" => error.to_string());
+            warn!(
+                "Error sending session shutdown signal",
+                "error" = error.to_string()
+            );
         }
 
-        debug!(self.log, "Session closed"; "from" => &self.from, "dest_address" => &self.dest.address);
+        debug!(
+            "Session closed",
+            "from" = &self.from,
+            "dest_address" = &self.dest.address
+        );
     }
 }
 

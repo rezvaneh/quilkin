@@ -20,9 +20,9 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use prometheus::Registry;
-use slog::{debug, o, warn, Logger};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tracing::{debug, warn};
 
 pub type SharedFilterManager = Arc<RwLock<FilterManager>>;
 
@@ -72,12 +72,11 @@ impl FilterManager {
     /// Returns a new instance backed by a stream of filter chain updates.
     /// Updates from the provided stream will be reflected in the current filter chain.
     pub fn dynamic(
-        base_logger: Logger,
         metrics_registry: &Registry,
         filter_chain_updates_rx: mpsc::Receiver<Arc<FilterChain>>,
         shutdown_rx: watch::Receiver<()>,
     ) -> Result<SharedFilterManager, FilterChainError> {
-        let log = Self::create_logger(base_logger);
+        // let log = Self::create_logger(base_logger); FIX THIS
 
         let filter_manager = Arc::new(RwLock::new(FilterManager {
             // Start out with an empty filter chain.
@@ -86,12 +85,7 @@ impl FilterManager {
 
         // Start a task in the background to receive LDS updates
         // and update the FilterManager's filter chain in turn.
-        Self::spawn_updater(
-            log,
-            filter_manager.clone(),
-            filter_chain_updates_rx,
-            shutdown_rx,
-        );
+        Self::spawn_updater(filter_manager.clone(), filter_chain_updates_rx, shutdown_rx);
 
         Ok(filter_manager)
     }
@@ -99,7 +93,6 @@ impl FilterManager {
     /// Spawns a task in the background that listens for filter chain updates and
     /// updates the filter manager's current filter in turn.
     fn spawn_updater(
-        log: Logger,
         filter_manager: SharedFilterManager,
         mut filter_chain_updates_rx: mpsc::Receiver<Arc<FilterChain>>,
         mut shutdown_rx: watch::Receiver<()>,
@@ -127,17 +120,12 @@ impl FilterManager {
             }
         });
     }
-
-    fn create_logger(base_logger: Logger) -> Logger {
-        base_logger.new(o!("source" => "FilterManager"))
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::FilterManager;
     use crate::filters::{Filter, FilterChain, FilterInstance, ReadContext, ReadResponse};
-    use crate::test_utils::logger;
 
     use std::sync::Arc;
     use std::time::Duration;
@@ -155,12 +143,7 @@ mod tests {
         let (filter_chain_updates_tx, filter_chain_updates_rx) = mpsc::channel(10);
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
 
-        FilterManager::spawn_updater(
-            logger(),
-            filter_manager.clone(),
-            filter_chain_updates_rx,
-            shutdown_rx,
-        );
+        FilterManager::spawn_updater(filter_manager.clone(), filter_chain_updates_rx, shutdown_rx);
 
         let filter_chain = {
             let manager_guard = filter_manager.read();
@@ -233,12 +216,7 @@ mod tests {
         let (filter_chain_updates_tx, filter_chain_updates_rx) = mpsc::channel(10);
         let (shutdown_tx, shutdown_rx) = watch::channel(());
 
-        FilterManager::spawn_updater(
-            logger(),
-            filter_manager.clone(),
-            filter_chain_updates_rx,
-            shutdown_rx,
-        );
+        FilterManager::spawn_updater(filter_manager.clone(), filter_chain_updates_rx, shutdown_rx);
 
         // Send a shutdown signal.
         shutdown_tx.send(()).unwrap();

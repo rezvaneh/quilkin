@@ -19,7 +19,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::str::from_utf8;
 use std::sync::Arc;
 
-use slog::{o, warn, Drain, Logger};
+use slog::{o, warn, Drain};
 use slog_term::{FullFormat, PlainSyncDecorator};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -79,16 +79,7 @@ impl Filter for TestFilter {
     }
 }
 
-// logger returns a standard out, non structured terminal logger, suitable for using in tests,
-// since it's more human readable.
-pub fn logger() -> Logger {
-    let plain = PlainSyncDecorator::new(std::io::stdout());
-    let drain = FullFormat::new(plain).build().fuse();
-    Logger::root(drain, o!())
-}
-
 pub struct TestHelper {
-    pub log: Logger,
     /// Channel to subscribe to, and trigger the shutdown of created resources.
     shutdown_ch: Option<(watch::Sender<()>, watch::Receiver<()>)>,
     server_shutdown_tx: Vec<Option<watch::Sender<()>>>,
@@ -131,7 +122,6 @@ impl Drop for TestHelper {
 impl Default for TestHelper {
     fn default() -> Self {
         TestHelper {
-            log: logger(),
             shutdown_ch: None,
             server_shutdown_tx: vec![],
         }

@@ -17,7 +17,8 @@
 use std::{collections::HashSet, convert::TryInto, marker::PhantomData, sync::Arc};
 
 use prometheus::Registry;
-use slog::{o, Drain, Logger};
+use slog::Drain;
+
 use tonic::transport::Endpoint as TonicEndpoint;
 
 use crate::config::{Config, ManagementServer, Proxy, Source, ValidationError, ValueInvalidArgs};
@@ -87,7 +88,6 @@ impl ValidationStatus for PendingValidation {
 
 /// Represents the components needed to create a Server.
 pub struct Builder<V> {
-    log: Logger,
     config: Arc<Config>,
     filter_registry: FilterRegistry,
     admin: Option<ProxyAdmin>,
@@ -97,16 +97,14 @@ pub struct Builder<V> {
 
 impl From<Arc<Config>> for Builder<PendingValidation> {
     fn from(config: Arc<Config>) -> Self {
-        let log = logger();
-        let metrics = Arc::new(Metrics::new(&log, Registry::default()));
-        let health = Health::new(&log);
-        let admin = ProxyAdmin::new(&log, config.admin.address, metrics.clone(), health);
+        let metrics = Arc::new(Metrics::new(Registry::default()));
+        let health = Health::new();
+        let admin = ProxyAdmin::new(config.admin.address, metrics.clone(), health);
         Builder {
             config,
             filter_registry: FilterRegistry::new(FilterSet::default()),
             admin: Some(admin),
             metrics,
-            log,
             validation_status: PendingValidation,
         }
     }
@@ -199,10 +197,6 @@ impl ValidatedConfig {
 }
 
 impl Builder<PendingValidation> {
-    pub fn with_log(self, log: Logger) -> Self {
-        Self { log, ..self }
-    }
-
     pub fn with_filter_registry(self, filter_registry: FilterRegistry) -> Self {
         Self {
             filter_registry,
@@ -224,7 +218,6 @@ impl Builder<PendingValidation> {
             ValidatedConfig::validate(self.config.clone(), &self.filter_registry, &self.metrics)?;
 
         Ok(Builder {
-            log: self.log,
             config: self.config,
             admin: self.admin,
             metrics: self.metrics,
@@ -235,9 +228,10 @@ impl Builder<PendingValidation> {
 }
 
 impl Builder<Validated> {
+    #[cfg_attr(feature = "instrument", tracing::instrument(skip(self)))]
     pub fn build(self) -> Server {
         Server {
-            log: self.log.new(o!("source" => "server::Server")),
+            // log: self.log.new(o!("source" => "server::Server")),
             config: Arc::new(self.validation_status.0),
             proxy_metrics: ProxyMetrics::new(&self.metrics.registry)
                 .expect("proxy metrics should be setup properly"),
@@ -248,18 +242,6 @@ impl Builder<Validated> {
             filter_registry: self.filter_registry,
         }
     }
-}
-
-/// Create a new `slog::Logger` instance using the default
-/// quilkin configuration.
-pub fn logger() -> Logger {
-    let drain = slog_json::Json::new(std::io::stdout())
-        .set_pretty(false)
-        .add_default_keys()
-        .build()
-        .fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(drain, o!())
 }
 
 #[cfg(test)]

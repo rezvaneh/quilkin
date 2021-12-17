@@ -20,15 +20,14 @@ use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server as HyperServer, StatusCode};
-use slog::{error, info, o, Logger};
 use tokio::sync::watch;
+use tracing::{error, info, span, Level};
 
 use crate::cluster::cluster_manager::SharedClusterManager;
 use crate::filters::manager::SharedFilterManager;
 use crate::proxy::{config_dump, Health, Metrics};
 
 pub struct Admin {
-    log: Logger,
     /// The address that the Admin server starts on
     addr: SocketAddr,
     metrics: Arc<Metrics>,
@@ -44,9 +43,8 @@ struct HandleRequestArgs {
 }
 
 impl Admin {
-    pub fn new(base: &Logger, addr: SocketAddr, metrics: Arc<Metrics>, heath: Health) -> Self {
+    pub fn new(addr: SocketAddr, metrics: Arc<Metrics>, heath: Health) -> Self {
         Admin {
-            log: base.new(o!("source" => "proxy::Admin")),
             addr,
             metrics,
             health: Arc::new(heath),
@@ -59,7 +57,7 @@ impl Admin {
         filter_manager: SharedFilterManager,
         mut shutdown_rx: watch::Receiver<()>,
     ) {
-        info!(self.log, "Starting admin endpoint"; "address" => self.addr.to_string());
+        info!("address" = self.addr.to_string(), "Starting admin endpoint");
 
         let args = HandleRequestArgs {
             metrics: self.metrics.clone(),
@@ -87,7 +85,7 @@ impl Admin {
         let log = self.log.clone();
         tokio::spawn(async move {
             if let Err(err) = server.await {
-                error!(log, "Admin server exited with an error"; "error" => %err);
+                error!("Admin server exited with an error","error" = %err);
             }
         });
     }

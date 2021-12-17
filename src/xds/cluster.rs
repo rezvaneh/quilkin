@@ -21,8 +21,8 @@ use std::{
 
 use bytes::Bytes;
 use prost::Message;
-use slog::{debug, o, warn, Logger};
 use tokio::sync::mpsc;
+use tracing::{debug, span, warn, Level};
 
 use crate::{
     cluster::{Cluster as ProxyCluster, ClusterLocalities, Locality, LocalityEndpoints},
@@ -46,8 +46,6 @@ use crate::{
 /// resources and exposes the results to the caller whenever
 /// the result changes.
 pub(crate) struct ClusterManager {
-    log: Logger,
-
     // Send discovery requests ACKs/NACKs to the server.
     discovery_req_tx: mpsc::Sender<DiscoveryRequest>,
 
@@ -69,12 +67,13 @@ impl ClusterManager {
     /// ACKs/NACKs are sent on the provided channel to be forwarded to the XDS
     /// server.
     pub(in crate::xds) fn new(
-        base: Logger,
         cluster_updates_tx: mpsc::Sender<HashMap<String, ProxyCluster>>,
         discovery_req_tx: mpsc::Sender<DiscoveryRequest>,
     ) -> Self {
+        let span = span!(Level::INFO, source = "xds::ClusterManager");
+        let _enter = span.enter();
+
         ClusterManager {
-            log: base.new(o!("source" => "xds::ClusterManager")),
             discovery_req_tx,
             cluster_updates_tx,
             clusters: HashMap::new(),
@@ -364,7 +363,6 @@ impl ClusterManager {
 mod tests {
     use super::{ClusterManager, ProxyCluster};
     use crate::endpoint::{Endpoint as ProxyEndpoint, EndpointAddress};
-    use crate::test_utils::logger;
     use crate::xds::envoy::config::cluster::v3::{cluster::ClusterDiscoveryType, Cluster};
     use crate::xds::envoy::config::core::v3::{
         address, socket_address::PortSpecifier, Address, Metadata, SocketAddress,
@@ -392,7 +390,7 @@ mod tests {
 
         let (cluster_updates_tx, _) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         let initial_names = vec!["a".into()];
         cm.on_cluster_response(cluster_discovery_response("1", "2", initial_names.clone()))
@@ -434,7 +432,7 @@ mod tests {
 
         let (cluster_updates_tx, _) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         let names = vec!["a".into(), "b".into()];
         cm.on_cluster_response(cluster_discovery_response("3", "6", names.clone()))
@@ -518,7 +516,7 @@ mod tests {
 
         let (cluster_updates_tx, _) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         let names = vec!["a".into(), "b".into()];
         cm.on_cluster_response(cluster_discovery_response("3", "6", names.clone()))
@@ -554,7 +552,7 @@ mod tests {
 
         let (cluster_updates_tx, _) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         let initial_names = vec!["a".into()];
         cm.on_cluster_response(cluster_discovery_response("1", "2", initial_names.clone()))
@@ -585,7 +583,7 @@ mod tests {
 
         let (cluster_updates_tx, _) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         cm.on_cluster_response(cluster_discovery_response(
             "1",
@@ -635,7 +633,7 @@ mod tests {
 
         let (cluster_updates_tx, mut cluster_updates_rx) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, _) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         cm.on_cluster_response(cluster_discovery_response(
             "1",
@@ -698,7 +696,7 @@ mod tests {
 
         let (cluster_updates_tx, mut cluster_updates_rx) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, _) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         cm.on_cluster_response(cluster_discovery_response(
             "1",
@@ -754,7 +752,7 @@ mod tests {
 
         let (cluster_updates_tx, mut cluster_updates_rx) = mpsc::channel::<ClusterState>(100);
         let (discovery_req_tx, _) = mpsc::channel::<DiscoveryRequest>(100);
-        let mut cm = ClusterManager::new(logger(), cluster_updates_tx, discovery_req_tx);
+        let mut cm = ClusterManager::new(cluster_updates_tx, discovery_req_tx);
 
         cm.on_cluster_response(cluster_discovery_response_with_update(
             "1",

@@ -17,7 +17,6 @@
 use std::collections::HashMap;
 
 use prometheus::{Registry, Result as MetricsResult};
-use slog::{debug, error, info, o, warn, Logger};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError},
@@ -30,6 +29,7 @@ use tonic::{
     transport::{channel::Channel as TonicChannel, Error as TonicError},
     Request,
 };
+use tracing::{debug, error, info, span, warn, Level};
 use tryhard::{
     backoff_strategies::{BackoffStrategy, ExponentialBackoff},
     RetryFutureConfig, RetryPolicy,
@@ -70,15 +70,16 @@ pub const UPDATES_CHANNEL_BUFFER_SIZE: usize = 1;
 
 /// AdsClient is a client that can talk to an XDS server using the ADS protocol.
 pub(crate) struct AdsClient {
-    log: Logger,
     metrics: Metrics,
 }
 
 impl AdsClient {
-    pub fn new(base_logger: Logger, metrics_registry: &Registry) -> MetricsResult<Self> {
-        let log = base_logger.new(o!("source" => "xds::AdsClient"));
+    pub fn new(metrics_registry: &Registry) -> MetricsResult<Self> {
+        let span = span!(Level::INFO, source = "xds::AdsClient");
+        let _enter = span.enter();
+
         let metrics = Metrics::new(metrics_registry)?;
-        Ok(Self { log, metrics })
+        Ok(Self { metrics })
     }
 
     /// Continuously tracks CDS and EDS resources on an ADS server,
@@ -106,7 +107,7 @@ impl AdsClient {
                 }
 
                 RpcSessionError::InitialConnect(ref err) => {
-                    error!(log, "Unable to connect to the XDS server"; "error" => %err);
+                    error!( "Unable to connect to the XDS server", "error" = %err);
 
                     // Do not retry if this is an invalid URL error that we cannot recover from.
                     // Need to use {:?} as the Display output only returns 'transport error'
@@ -119,7 +120,7 @@ impl AdsClient {
                 }
 
                 RpcSessionError::Receive(ref status) => {
-                    error!(log, "Failed to receive response from XDS server"; "status" => #?status);
+                    error!("Failed to receive response from XDS server", "status" = #?status);
                     RetryPolicy::Delay(backoff.delay(attempt, &error))
                 }
             }
@@ -172,7 +173,6 @@ impl AdsClient {
 /// Represents the receiving side of the RPC channel.
 pub struct RpcReceiver {
     client: AggregatedDiscoveryServiceClient<TonicChannel>,
-    log: Logger,
     metrics: Metrics,
     resource_handlers: ResourceHandlers,
     rpc_rx: mpsc::Receiver<DiscoveryRequest>,
@@ -233,7 +233,6 @@ impl RpcReceiver {
 /// Represents a complete aDS gRPC session.
 pub struct RpcSession {
     discovery_req_rx: mpsc::Receiver<DiscoveryRequest>,
-    log: Logger,
     metrics: Metrics,
     node_id: String,
     addr: String,
@@ -259,7 +258,6 @@ impl RpcSession {
         // Spawn a task that runs the receive loop.
         let mut recv_loop_join_handle = RpcReceiver {
             client,
-            log: self.log.clone(),
             metrics: self.metrics.clone(),
             resource_handlers: self.resource_handlers,
             rpc_rx,
@@ -316,7 +314,6 @@ impl RpcSession {
 }
 
 struct RpcSender {
-    log: Logger,
     metrics: Metrics,
     rpc_tx: mpsc::Sender<DiscoveryRequest>,
 }
@@ -367,7 +364,7 @@ impl RpcSender {
 
         self.metrics.requests_total.inc();
 
-        debug!(self.log, "Sending rpc discovery"; "request" => #?req);
+        debug!("Sending rpc discovery", "request" = #?req);
 
         self.rpc_tx.send(req).await
     }
@@ -416,7 +413,6 @@ enum RpcSessionError {
 
 // Send a Discovery request with the provided arguments on the channel.
 pub(super) async fn send_discovery_req(
-    log: Logger,
     type_url: &'static str,
     version_info: String,
     response_nonce: String,
@@ -440,9 +436,8 @@ pub(super) async fn send_discovery_req(
         .await
         .map_err(|err| {
             warn!(
-                log,
-                "Failed to send discovery request";
-                "type" => %type_url, "error" => %err
+                "Failed to send discovery request",
+                "type" = %type_url, "error" = %err
             )
         })
         // ok is safe here since an error would mean that we've dropped/closed the receiving
@@ -456,7 +451,6 @@ mod tests {
     use super::AdsClient;
     use crate::config::ManagementServer;
     use crate::filters::FilterRegistry;
-    use crate::proxy::logger;
     use crate::xds::ads_client::ListenerManagerArgs;
     use crate::xds::envoy::service::discovery::v3::DiscoveryRequest;
     use crate::xds::google::rpc::Status as GrpcStatus;
@@ -475,7 +469,7 @@ mod tests {
         let (_shutdown_tx, shutdown_rx) = watch::channel::<()>(());
         let (cluster_updates_tx, _) = mpsc::channel(10);
         let (filter_chain_updates_tx, _) = mpsc::channel(10);
-        let run = AdsClient::new(logger(), &Registry::default()).unwrap().run(
+        let run = AdsClient::new(&Registry::default()).unwrap().run(
             "test-id".into(),
             vec![ManagementServer {
                 address: "localhost:18000".into(),
@@ -502,7 +496,6 @@ mod tests {
 
         for error_message in vec![Some("Boo!".into()), None] {
             super::send_discovery_req(
-                logger(),
                 CLUSTER_TYPE,
                 "101".into(),
                 "nonce-101".into(),

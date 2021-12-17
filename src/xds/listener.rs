@@ -29,15 +29,13 @@ use crate::xds::ads_client::send_discovery_req;
 use bytes::Bytes;
 use prometheus::Registry;
 use prost::Message;
-use slog::{debug, warn, Logger};
+use slog::{debug, warn};
 use tokio::sync::mpsc;
 
 /// Tracks FilterChain resources on the LDS DiscoveryResponses and
 /// instantiates a corresponding proxy filter chain and exposes it
 /// to the caller whenever the filter chain changes.
 pub(crate) struct ListenerManager {
-    log: Logger,
-
     metrics_registry: Registry,
 
     // Registry to lookup filter factories by name.
@@ -52,12 +50,10 @@ pub(crate) struct ListenerManager {
 
 impl ListenerManager {
     pub(in crate::xds) fn new(
-        log: Logger,
         args: ListenerManagerArgs,
         discovery_req_tx: mpsc::Sender<DiscoveryRequest>,
     ) -> Self {
         ListenerManager {
-            log,
             metrics_registry: args.metrics_registry,
             filter_registry: args.filter_registry,
             discovery_req_tx,
@@ -190,7 +186,6 @@ impl ListenerManager {
 mod tests {
     use super::ListenerManager;
     use crate::filters::{manager::ListenerManagerArgs, prelude::*};
-    use crate::test_utils::logger;
     use crate::xds::envoy::config::listener::v3::{
         filter::ConfigType, Filter as LdsFilter, FilterChain as LdsFilterChain, Listener,
     };
@@ -282,7 +277,6 @@ mod tests {
         let (filter_chain_updates_tx, mut filter_chain_updates_rx) = mpsc::channel(10);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel(10);
         let mut manager = ListenerManager::new(
-            logger(),
             ListenerManagerArgs::new(
                 Registry::default(),
                 filter_registry,
@@ -387,7 +381,6 @@ mod tests {
         let (filter_chain_updates_tx, mut filter_chain_updates_rx) = mpsc::channel(10);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel(10);
         let mut manager = ListenerManager::new(
-            logger(),
             ListenerManagerArgs::new(
                 Registry::default(),
                 filter_registry,
@@ -496,7 +489,6 @@ mod tests {
         let (filter_chain_updates_tx, _filter_chain_updates_rx) = mpsc::channel(10);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel(10);
         let mut manager = ListenerManager::new(
-            logger(),
             ListenerManagerArgs::new(
                 Registry::default(),
                 filter_registry,
@@ -604,7 +596,6 @@ mod tests {
         let (filter_chain_updates_tx, _filter_chain_updates_rx) = mpsc::channel(10);
         let (discovery_req_tx, mut discovery_req_rx) = mpsc::channel(10);
         let mut manager = ListenerManager::new(
-            logger(),
             ListenerManagerArgs::new(
                 Registry::default(),
                 FilterRegistry::new(FilterSet::default()),

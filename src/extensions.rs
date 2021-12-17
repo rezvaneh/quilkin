@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-use slog::Logger;
-
 pub(crate) use filter_chain::Error as FilterChainError;
 
 pub(crate) mod filter_manager;
